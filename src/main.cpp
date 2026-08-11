@@ -3,6 +3,8 @@
 #include "display/Display.h"
 #include "ui/UI.h"
 
+#include "storage/Storage.h"
+
 void setup()
 {
     Serial.begin(115200);
@@ -19,6 +21,9 @@ void setup()
         Serial.println("Display initialization failed.");
         return;
     }
+
+    Storage::begin();
+    Storage::listRoot();
 
     UI::begin();
 

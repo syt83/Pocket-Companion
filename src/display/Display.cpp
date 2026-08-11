@@ -16,7 +16,7 @@
 #define TP_SDA   48
 #define TP_SCL   47
 
-#define LCD_ROTATION 1
+#define LCD_ROTATION 0
 #define LCD_H_RES 240
 #define LCD_V_RES 320
 
