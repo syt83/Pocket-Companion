@@ -39,7 +39,7 @@
 #define LV_COLOR_MIX_ROUND_OFS 0
 
 /*Images pixels with this color will not be drawn if they are chroma keyed)*/
-#define LV_COLOR_CHROMA_KEY lv_color_hex(0x00ff00)         /*pure green*/
+#define LV_COLOR_CHROMA_KEY lv_color_hex(0xFF00FF)         /*magenta*/
 
 /*=========================
    MEMORY SETTINGS

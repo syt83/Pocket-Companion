@@ -1,17 +1,23 @@
 #include "UI.h"
 
 #include <lvgl.h>
+#include <Arduino.h>
+#include "../character/CharacterRenderer.h"
 
 // ============================================================
 // UI Objects
 // ============================================================
 
-static lv_obj_t *statusLabel;
-static lv_obj_t *messageLabel;
+static lv_obj_t *statusLabel = nullptr;
+static lv_obj_t *messageLabel = nullptr;
 
-static lv_obj_t *face;
-static lv_obj_t *leftEye;
-static lv_obj_t *rightEye;
+
+// ============================================================
+// Character Renderer
+// ============================================================
+
+static CharacterRenderer character;
+
 
 // ============================================================
 // Character State
@@ -20,35 +26,44 @@ static lv_obj_t *rightEye;
 static UI::Expression currentExpression =
     UI::Expression::HAPPY;
 
-static bool eyesClosed = false;
-static int faceBaseY = 0;
+
+// ============================================================
+// Character Position
+// ============================================================
+
+static constexpr int32_t CHARACTER_Y = 35;
 
 
 // ============================================================
-// Eye Control
+// Character Position Update
 // ============================================================
 
-static void setEyesOpen()
+static void updateCharacterPosition()
 {
-    lv_obj_set_size(leftEye, 24, 24);
-    lv_obj_set_size(rightEye, 24, 24);
+    if (character.object() == nullptr)
+        return;
 
-    lv_obj_set_pos(leftEye, 35, 45);
-    lv_obj_set_pos(rightEye, 90, 45);
+    int32_t screenWidth =
+        lv_obj_get_width(
+            lv_scr_act()
+        );
 
-    eyesClosed = false;
+    int32_t characterWidth =
+        character.width();
+
+    int32_t x =
+        (screenWidth - characterWidth) / 2;
+
+    character.setPosition(
+        x,
+        CHARACTER_Y
+    );
 }
 
-static void setEyesClosed()
-{
-    lv_obj_set_size(leftEye, 24, 4);
-    lv_obj_set_size(rightEye, 24, 4);
 
-    lv_obj_set_pos(leftEye, 35, 55);
-    lv_obj_set_pos(rightEye, 90, 55);
-
-    eyesClosed = true;
-}
+// ============================================================
+// Expression
+// ============================================================
 
 void UI::setExpression(
     UI::Expression expression
@@ -56,14 +71,23 @@ void UI::setExpression(
 {
     currentExpression = expression;
 
+    const char *imagePath = nullptr;
+
+
     switch (expression)
     {
+        // ----------------------------------------------------
+        // HAPPY
+        // ----------------------------------------------------
+
         case UI::Expression::HAPPY:
 
-            lv_obj_set_style_bg_color(
-                face,
-                lv_color_hex(0xFFE08A),
-                0
+            imagePath =
+                "/character/happy.rgb565";
+
+            lv_label_set_text(
+                messageLabel,
+                "Hello!"
             );
 
             lv_label_set_text(
@@ -74,12 +98,18 @@ void UI::setExpression(
             break;
 
 
+        // ----------------------------------------------------
+        // WORRIED
+        // ----------------------------------------------------
+
         case UI::Expression::WORRIED:
 
-            lv_obj_set_style_bg_color(
-                face,
-                lv_color_hex(0xB8D8FF),
-                0
+            imagePath =
+                "/character/worried.rgb565";
+
+            lv_label_set_text(
+                messageLabel,
+                "Hmm..."
             );
 
             lv_label_set_text(
@@ -90,12 +120,18 @@ void UI::setExpression(
             break;
 
 
+        // ----------------------------------------------------
+        // SAD
+        // ----------------------------------------------------
+
         case UI::Expression::SAD:
 
-            lv_obj_set_style_bg_color(
-                face,
-                lv_color_hex(0xAFC5E8),
-                0
+            imagePath =
+                "/character/sad.rgb565";
+
+            lv_label_set_text(
+                messageLabel,
+                "Oh..."
             );
 
             lv_label_set_text(
@@ -106,77 +142,48 @@ void UI::setExpression(
             break;
 
 
+        // ----------------------------------------------------
+        // SURPRISED
+        // ----------------------------------------------------
+
         case UI::Expression::SURPRISED:
 
-            lv_obj_set_style_bg_color(
-                face,
-                lv_color_hex(0xFFD1A9),
-                0
+            imagePath =
+                "/character/surprised.rgb565";
+
+            lv_label_set_text(
+                messageLabel,
+                "Wow!"
             );
 
             lv_label_set_text(
                 statusLabel,
-                "Wow!"
+                "That's surprising!"
             );
 
             break;
     }
 
-    // 표정이 변경될 때 눈은 열린 상태에서 시작
-    setEyesOpen();
-}
 
-// ============================================================
-// Blink Animation
-// ============================================================
+    // --------------------------------------------------------
+    // Load Character Image
+    // --------------------------------------------------------
 
-static void blinkOpenCallback(lv_timer_t *timer)
-{
-    setEyesOpen();
-}
-
-static void blinkCallback(lv_timer_t *timer)
-{
-    if (!eyesClosed)
+    if (imagePath != nullptr)
     {
-        setEyesClosed();
-
-        // 150ms 후 눈을 다시 뜬다.
-        lv_timer_t *openTimer =
-            lv_timer_create(
-                blinkOpenCallback,
-                150,
-                nullptr
+        if (!character.loadImage(imagePath))
+        {
+            Serial.print(
+                "[UI] Failed to load character: "
             );
 
-        lv_timer_set_repeat_count(openTimer, 1);
+            Serial.println(imagePath);
+        }
+        else
+        {
+            updateCharacterPosition();
+        }
     }
-}
-
-
-// ============================================================
-// Character Idle Animation
-// ============================================================
-
-static void idleAnimationCallback(
-    lv_timer_t *timer
-)
-{
-    static int offset = 0;
-    static int direction = 1;
-
-    offset += direction;
-
-    if (offset >= 3)
-        direction = -1;
-
-    if (offset <= -3)
-        direction = 1;
-
-    lv_obj_set_y(
-        face,
-        faceBaseY + offset
-    );
 }
 
 
@@ -184,14 +191,17 @@ static void idleAnimationCallback(
 // Talk Button
 // ============================================================
 
-static void buttonEvent(lv_event_t *event)
+static void buttonEvent(
+    lv_event_t *event
+)
 {
-    static int state = 0;
+    static uint8_t state = 0;
 
     state++;
 
     if (state > 3)
         state = 0;
+
 
     switch (state)
     {
@@ -199,11 +209,6 @@ static void buttonEvent(lv_event_t *event)
 
             UI::setExpression(
                 UI::Expression::HAPPY
-            );
-
-            lv_label_set_text(
-                messageLabel,
-                "Hello!"
             );
 
             break;
@@ -215,11 +220,6 @@ static void buttonEvent(lv_event_t *event)
                 UI::Expression::WORRIED
             );
 
-            lv_label_set_text(
-                messageLabel,
-                "Hmm..."
-            );
-
             break;
 
 
@@ -227,11 +227,6 @@ static void buttonEvent(lv_event_t *event)
 
             UI::setExpression(
                 UI::Expression::SAD
-            );
-
-            lv_label_set_text(
-                messageLabel,
-                "Oh..."
             );
 
             break;
@@ -243,60 +238,8 @@ static void buttonEvent(lv_event_t *event)
                 UI::Expression::SURPRISED
             );
 
-            lv_label_set_text(
-                messageLabel,
-                "Wow!"
-            );
-
             break;
     }
-}
-
-
-// ============================================================
-// Create Eye
-// ============================================================
-
-static lv_obj_t *createEye(
-    lv_obj_t *parent,
-    int x,
-    int y
-)
-{
-    lv_obj_t *eye =
-        lv_obj_create(parent);
-
-    lv_obj_set_size(
-        eye,
-        24,
-        24
-    );
-
-    lv_obj_set_pos(
-        eye,
-        x,
-        y
-    );
-
-    lv_obj_set_style_radius(
-        eye,
-        LV_RADIUS_CIRCLE,
-        0
-    );
-
-    lv_obj_set_style_bg_color(
-        eye,
-        lv_color_black(),
-        0
-    );
-
-    lv_obj_set_style_border_width(
-        eye,
-        0,
-        0
-    );
-
-    return eye;
 }
 
 
@@ -342,66 +285,6 @@ void UI::begin()
 
 
     // --------------------------------------------------------
-    // Character Face
-    // --------------------------------------------------------
-
-    face =
-        lv_obj_create(screen);
-
-    lv_obj_set_size(
-        face,
-        150,
-        150
-    );
-
-    lv_obj_align(
-        face,
-        LV_ALIGN_CENTER,
-        0,
-        -35
-    );
-
-    faceBaseY = lv_obj_get_y(face);
-
-    lv_obj_set_style_radius(
-        face,
-        LV_RADIUS_CIRCLE,
-        0
-    );
-
-    lv_obj_set_style_bg_color(
-        face,
-        lv_color_hex(0xFFE08A),
-        0
-    );
-
-    lv_obj_set_style_border_width(
-        face,
-        0,
-        0
-    );
-
-
-    // --------------------------------------------------------
-    // Eyes
-    // --------------------------------------------------------
-
-    leftEye =
-        createEye(
-            face,
-            35,
-            45
-        );
-
-    rightEye =
-        createEye(
-            face,
-            90,
-            45
-        );
-
-
-    // --------------------------------------------------------
     // Message
     // --------------------------------------------------------
 
@@ -417,7 +300,7 @@ void UI::begin()
         messageLabel,
         LV_ALIGN_CENTER,
         0,
-        75
+        85
     );
 
 
@@ -435,9 +318,32 @@ void UI::begin()
 
     lv_obj_align(
         statusLabel,
-        LV_ALIGN_BOTTOM_MID,
+        LV_ALIGN_CENTER,
         0,
-        85
+        110
+    );
+
+
+    // --------------------------------------------------------
+    // Character Renderer
+    // --------------------------------------------------------
+
+    if (!character.begin(screen))
+    {
+        Serial.println(
+            "[UI] CharacterRenderer initialization failed."
+        );
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // Initial Expression
+    // --------------------------------------------------------
+
+    UI::setExpression(
+        UI::Expression::HAPPY
     );
 
 
@@ -458,7 +364,7 @@ void UI::begin()
         button,
         LV_ALIGN_BOTTOM_MID,
         0,
-        -5
+        -10
     );
 
     lv_obj_add_event_cb(
@@ -467,6 +373,7 @@ void UI::begin()
         LV_EVENT_CLICKED,
         nullptr
     );
+
 
     lv_obj_t *buttonLabel =
         lv_label_create(button);
@@ -477,38 +384,4 @@ void UI::begin()
     );
 
     lv_obj_center(buttonLabel);
-
-
-    // --------------------------------------------------------
-    // Automatic Blink
-    // --------------------------------------------------------
-
-    lv_timer_create(
-        blinkCallback,
-        3000,
-        nullptr
-    );
-
-
-    // --------------------------------------------------------
-    // Idle Animation
-    // --------------------------------------------------------
-
-    /*
-     * 현재는 얼굴이 아주 조금씩 위아래로 움직이도록
-     * 테스트한다.
-     *
-     * 이후 실제 캐릭터 이미지가 들어오면
-     * 이 부분을 캐릭터 애니메이션 시스템으로 교체한다.
-     */
-
-    lv_timer_create(
-        idleAnimationCallback,
-        200,
-        nullptr
-    );
-
-    UI::setExpression(
-    UI::Expression::HAPPY
-);
 }
