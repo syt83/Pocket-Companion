@@ -1,0 +1,404 @@
+# Image Rendering Troubleshooting
+
+Pocket Companion에서 ESP32-S3 + LVGL + SD 카드에 저장된 캐릭터 이미지를 표시하는 과정에서 발생했던 문제와 해결 방법을 정리한 문서
+
+---
+
+## 1. 목표
+
+SD 카드에 저장된 캐릭터 이미지를 ESP32-S3의 240 × 320 LCD에 표시하는 것을 목표로 함
+
+최종적으로 다음과 같은 구조를 구현함
+
+```text
+SD Card
+  ↓
+Character Image
+  ↓
+CharacterRenderer
+  ↓
+RGB565 Buffer
+  ↓
+LVGL Image Object
+  ↓
+LCD
+```
+
+---
+
+## 2. 초기 접근 — LVGL의 BMP/PNG Decoder 사용
+
+처음에는 LVGL의 기본 이미지 디코더를 이용하여 SD 카드의 이미지를 직접 표시하려고 하였다
+
+사용하려던 경로:
+
+```text
+SD Card
+└── character/
+    └── happy.bmp
+```
+
+LVGL에서는 다음과 같은 방식으로 이미지를 지정
+
+```cpp
+lv_img_set_src(
+    characterImage,
+    "S:/character/happy.bmp"
+);
+```
+
+LVGL 설정에서는 이미지 기능과 BMP/PNG Decoder를 활성화함
+
+```cpp
+#define LV_USE_IMG 1
+#define LV_USE_BMP 1
+#define LV_USE_PNG 1
+```
+
+---
+
+## 3. LVGL File System과 SD 카드 연결
+
+LVGL이 ESP32의 SD 카드에 직접 접근할 수 있도록 별도의 File System Driver를 구현
+
+LVGL에서는:
+
+```text
+S:
+```
+
+를 SD 카드 드라이브로 사용
+
+예:
+
+```text
+S:/character/happy.bmp
+```
+
+### 구현한 기능
+
+* `open`
+* `close`
+* `read`
+* `seek`
+* `tell`
+
+을 `lv_fs_drv_t`에 등록하여 LVGL과 ESP32 `SD` 라이브러리를 연결함
+
+```cpp
+drv.letter = 'S';
+
+drv.open_cb  = fs_open;
+drv.close_cb = fs_close;
+drv.read_cb  = fs_read;
+drv.seek_cb  = fs_seek;
+drv.tell_cb  = fs_tell;
+
+lv_fs_drv_register(&drv);
+```
+
+---
+
+## 4. 문제 1 — 이미지가 `No data`로 표시됨
+
+화면에 이미지 영역은 생성되었지만 다음과 같이 표시됨
+
+```text
+No data
+```
+
+### 확인 과정
+
+Serial Monitor에서 다음 로그를 확인
+
+```text
+[LVGL FS] OPEN
+Path received: /character/happy.bmp
+Mode: READ
+[LVGL FS] FILE OPENED
+File size: 120138
+
+[LVGL FS] READ
+Requested: 54
+Read: 54
+```
+
+이를 통해 다음 사항을 확인
+
+* SD 카드 정상 동작
+* 파일 경로 정상
+* `happy.bmp` 파일 존재
+* LVGL이 파일을 정상적으로 열 수 있음
+* BMP 파일의 처음 54바이트를 정상적으로 읽음
+
+BMP 파일의 시작 바이트도 정상적인 BMP 시그니처였다.
+
+```text
+42 4D
+```
+
+---
+
+## 5. 문제 2 — `seek()`가 호출되지 않음
+
+BMP Decoder가 다음 단계로 진행하지 않고 다음과 같은 동작을 반복함
+
+```text
+OPEN
+  ↓
+READ 54 bytes
+  ↓
+종료
+```
+
+`seek()` callback은 호출되지 않음
+
+이를 통해 파일 시스템의 단순한 `open()` 문제보다는 LVGL 이미지 Decoder가 파일 헤더를 해석하는 과정에서 실패하고 있음을 확인
+
+---
+
+## 6. 문제 3 — BMP뿐만 아니라 PNG도 정상적으로 표시되지 않음
+
+BMP 파일의 형식 문제인지 확인하기 위해 PNG 이미지도 테스트함
+
+그러나 PNG 역시 정상적으로 표시되지 않음
+
+따라서 특정 BMP 파일 하나의 문제로 판단하지 않고 다른 접근 방법을 검토함
+
+---
+
+## 7. 중간에 확인한 LVGL 설정
+
+사용 중인 LVGL 버전은:
+
+```text
+LVGL 8.4.0
+```
+
+입니다.
+
+`lv_conf.h`에서는 다음 설정을 사용
+
+```cpp
+#define LV_COLOR_DEPTH 16
+
+#define LV_USE_IMG 1
+
+#define LV_USE_PNG 1
+#define LV_USE_BMP 1
+```
+
+또한 현재 프로젝트는 ESP32-S3에서 RGB565 기반으로 동작하도록 구성되어 있음
+
+---
+
+## 8. 최종 해결 방법 — CharacterRenderer 직접 구현
+
+LVGL의 BMP/PNG 파일 Decoder에 의존하는 대신 CharacterRenderer를 직접 구현함
+
+최종 구조:
+
+```text
+SD Card
+  ↓
+.rgb565 파일
+  ↓
+CharacterRenderer
+  ↓
+PSRAM
+  ↓
+LVGL Image Descriptor
+  ↓
+LCD
+```
+
+이 방법에서는 LVGL File System Driver를 통해 이미지를 해석하지 않고, `CharacterRenderer`가 직접 SD 카드에서 데이터를 읽어옴
+
+---
+
+## 9. RGB565 전용 캐릭터 파일 형식
+
+캐릭터 이미지는 일반 BMP/PNG 대신 `.rgb565` 파일로 변환
+
+파일 구조:
+
+```text
+2 bytes   width
+2 bytes   height
+N bytes   RGB565 pixel data
+```
+
+예를 들어 160 × 160 이미지:
+
+```text
+4 bytes
++
+160 × 160 × 2 bytes
+```
+
+총:
+
+```text
+51,204 bytes
+```
+RGB565는 ESP32-S3의 현재 LVGL 설정인 16-bit color depth와 맞음
+
+---
+
+## 10. Python 이미지 변환기
+
+PNG/JPG 이미지를 `.rgb565`로 변환하는 Python 프로그램을 작성함
+
+사용 예:
+
+```bash
+python convert_rgb565.py happy.png happy.rgb565 --width 160 --height 160
+```
+
+변환:
+
+```text
+happy.png
+    ↓
+convert_rgb565.py
+    ↓
+happy.rgb565
+```
+
+생성된 파일은 SD 카드에 다음과 같이 저장
+
+```text
+SD/
+└── character/
+    ├── happy.rgb565
+    ├── worried.rgb565
+    ├── sad.rgb565
+    └── surprised.rgb565
+```
+
+---
+
+## 11. 투명 배경 문제
+
+PNG의 투명 영역을 RGB565로 변환하면 Alpha Channel이 사라지기 때문에 기본적으로 배경색이 생김
+
+초기 변환에서는 투명 영역이 흰색으로 변화
+
+이를 해결하기 위해 Chroma Key 방식을 사용
+
+`lv_conf.h`:
+
+```cpp
+#define LV_COLOR_CHROMA_KEY lv_color_hex(0xFF00FF)
+```
+
+투명 영역은 RGB:
+
+```text
+255, 0, 255
+```
+
+즉 Magenta로 변환
+
+그리고 LVGL 이미지 형식을:
+
+```cpp
+LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED
+```
+
+로 설정
+
+이를 통해 Magenta 영역이 투명하게 처리
+
+### 현재 상태
+
+Chroma Key 방식에서 발생할 수 있는 안티앨리어싱 경계 문제로 캐릭터 주변에 약간의 Magenta Edge가 남음
+
+---
+
+## 12. CharacterRenderer 적용
+
+최종적으로 UI에서는 직접 BMP/PNG를 처리하지 않고 `CharacterRenderer`를 사용
+
+예:
+
+```cpp
+character.begin(screen);
+
+character.loadImage(
+    "/character/happy.rgb565"
+);
+```
+
+표정 변경 시에도:
+
+```cpp
+UI::setExpression(
+    UI::Expression::HAPPY
+);
+```
+
+와 같은 방식으로 관리
+
+각 표정은 다음과 연결됨
+
+```text
+HAPPY
+  → /character/happy.rgb565
+
+WORRIED
+  → /character/worried.rgb565
+
+SAD
+  → /character/sad.rgb565
+
+SURPRISED
+  → /character/surprised.rgb565
+```
+
+---
+
+## 13. 현재 최종 상태
+
+이미지 표시 시스템은 다음 단계까지 완료
+
+* [x] SD 카드 인식
+* [x] SD 카드 파일 접근
+* [x] LVGL 이미지 객체 생성
+* [x] CharacterRenderer 구현
+* [x] PNG/JPG → RGB565 변환기 구현
+* [x] RGB565 파일을 SD 카드에서 읽기
+* [x] PSRAM에 이미지 데이터 저장
+* [x] LVGL에 메모리 기반 이미지로 표시
+* [x] 투명 배경 Chroma Key 처리
+* [x] 실제 캐릭터 이미지 표시
+* [x] 4가지 표정 이미지 표시
+
+---
+
+## 14. 향후 개선 사항
+
+현재는 캐릭터 이미지를 안정적으로 표시하는 것에 집중함.
+
+향후에는 다음과 같은 애니메이션 시스템을 추가할 예정.
+
+```text
+Idle
+Blink
+Talk
+Emotion
+```
+
+예:
+
+```text
+happy/
+├── idle.rgb565
+├── blink.rgb565
+├── talk_01.rgb565
+└── talk_02.rgb565
+```
+
+향후 `CharacterAnimationManager`를 별도로 구현하여 표정과 애니메이션을 독립적으로 관리할 예정.
+
+또한 Chroma Key 방식 대신 Alpha Channel을 지원하는 이미지 포맷을 사용하여 캐릭터 가장자리의 Magenta Edge 문제를 개선할 계획.

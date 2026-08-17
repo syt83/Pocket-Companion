@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include <Arduino.h>
 #include "../character/CharacterRenderer.h"
+#include "NetworkPanel.h"
 
 // ============================================================
 // UI Objects
@@ -242,6 +243,35 @@ static void buttonEvent(
     }
 }
 
+static void screenGestureEvent(
+    lv_event_t *event
+)
+{
+    lv_indev_t *indev =
+        lv_indev_get_act();
+
+    if (!indev)
+        return;
+
+    lv_dir_t direction =
+        lv_indev_get_gesture_dir(
+            indev
+        );
+
+
+    // 아래 방향으로 스와이프
+    if (direction == LV_DIR_BOTTOM)
+    {
+        NetworkPanel::show();
+    }
+
+    // 위 방향으로 스와이프
+    else if (direction == LV_DIR_TOP)
+    {
+        NetworkPanel::hide();
+    }
+}
+
 
 // ============================================================
 // UI Initialization
@@ -251,6 +281,13 @@ void UI::begin()
 {
     lv_obj_t *screen =
         lv_scr_act();
+
+    lv_obj_add_event_cb(
+        screen,
+        screenGestureEvent,
+        LV_EVENT_GESTURE,
+        nullptr
+    );
 
 
     // --------------------------------------------------------
@@ -384,4 +421,5 @@ void UI::begin()
     );
 
     lv_obj_center(buttonLabel);
+    NetworkPanel::create();
 }

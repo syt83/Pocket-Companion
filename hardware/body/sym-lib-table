@@ -1,0 +1,6 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "MAX98357A")(type "KiCad")(uri "C:/Users/youngtak/Downloads/MAX98357A.kicad_sym")(options "")(descr ""))
+  (lib (name "ESP32-S3-Touch-LCD-2")(type "KiCad")(uri "C:/Users/youngtak/Downloads/ESP32-S3-Touch-LCD-2.kicad_sym")(options "")(descr ""))
+  (lib (name "INMP441")(type "KiCad")(uri "C:/Users/youngtak/Downloads/INMP441.kicad_sym")(options "")(descr ""))
+)
